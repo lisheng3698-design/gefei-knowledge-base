@@ -1,9 +1,9 @@
-const CACHE_NAME = 'gefei-kb-app-v20260630-mobile-lock';
+const CACHE_NAME = 'gefei-kb-app-v20260630-code-breaks';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css?v=20260630-mobile-lock',
-  './app.js?v=20260630-mobile-lock',
+  './styles.css?v=20260630-code-breaks',
+  './app.js?v=20260630-code-breaks',
   './kb-data.js',
   './manifest.webmanifest',
   './app-icon.svg'
