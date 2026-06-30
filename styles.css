@@ -71,6 +71,33 @@ h1 { margin: 6px 0 8px; font-size: 28px; line-height: 1.12; }
 .stat-card { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 10px; }
 .stat-card b { display: block; font-size: 18px; }
 .stat-card span { color: var(--muted); font-size: 12px; }
+.module-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 6px 14px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f2efe7;
+}
+.module-button {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+.module-button.active,
+.module-button:hover {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--accent);
+}
 .doc-list { display: grid; gap: 6px; }
 .doc-button {
   width: 100%; text-align: left; border: 1px solid transparent; background: transparent;
@@ -80,6 +107,26 @@ h1 { margin: 6px 0 8px; font-size: 28px; line-height: 1.12; }
 .doc-button.active { box-shadow: inset 3px 0 0 var(--accent); }
 .doc-button strong { display: block; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .doc-button span { color: var(--muted); font-size: 12px; }
+.path-stage-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 6px 2px;
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+.path-stage-label em {
+  flex: 0 0 auto;
+  font-style: normal;
+  color: var(--muted);
+  font-weight: 700;
+}
+.path-button span {
+  display: block;
+  line-height: 1.45;
+}
 .workspace {
   min-width: 0;
   min-height: 0;
@@ -314,8 +361,37 @@ h1 { margin: 6px 0 8px; font-size: 28px; line-height: 1.12; }
   font-size: 11px;
   font-weight: 700;
 }
+.path-result-group {
+  border: 1px solid #cbded9;
+  border-radius: var(--radius);
+  background: #edf7f4;
+  padding: 12px;
+}
+.path-result-stage {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  margin-bottom: 4px;
+}
+.path-result-group strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.path-result-group p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 12px; }
 .pill { border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; background: var(--panel-soft); }
+.path-pill {
+  border-color: #b9d9d3;
+  background: #e4f3ef;
+  color: #0b615a;
+  font-weight: 800;
+}
 .learned-pill {
   border-color: #9bcfc6;
   background: #e4f3ef;

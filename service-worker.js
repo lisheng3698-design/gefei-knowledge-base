@@ -1,10 +1,11 @@
-const CACHE_NAME = 'gefei-kb-app-v20260630-code-breaks';
+const CACHE_NAME = 'gefei-kb-app-v20260630-learning-path';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css?v=20260630-code-breaks',
-  './app.js?v=20260630-code-breaks',
+  './styles.css?v=20260630-learning-path',
+  './app.js?v=20260630-learning-path',
   './kb-data.js',
+  './learning-path.js',
   './manifest.webmanifest',
   './app-icon.svg'
 ];

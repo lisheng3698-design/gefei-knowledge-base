@@ -1,7 +1,10 @@
 const DATA = window.KB_DATA;
-const state = { docId: 'all', query: '', sort: 'source', activeId: null };
+const LEARNING_PATH = window.KB_LEARNING_PATH || { stages: [], sections: [], itemSection: {} };
+const state = { view: 'docs', docId: 'all', pathId: 'all', query: '', sort: 'source', activeId: null };
 
 const docList = document.getElementById('docList');
+const docModeButton = document.getElementById('docModeButton');
+const pathModeButton = document.getElementById('pathModeButton');
 const railStats = document.getElementById('railStats');
 const resultList = document.getElementById('resultList');
 const resultCount = document.getElementById('resultCount');
@@ -31,6 +34,10 @@ const syncStatus = document.getElementById('syncStatus');
 
 const itemById = new Map(DATA.items.map(item => [item.id, item]));
 const contextById = new Map(DATA.contexts.map(context => [context.id, context]));
+const pathSectionById = new Map((LEARNING_PATH.sections || []).map(section => [section.id, section]));
+const pathStageById = new Map((LEARNING_PATH.stages || []).map(stage => [stage.id, stage]));
+const pathOrderIds = (LEARNING_PATH.sections || []).flatMap(section => section.itemIds || []);
+const pathOrderById = new Map(pathOrderIds.map((id, index) => [id, index]));
 const searchMetaById = new Map();
 const searchIndexById = new Map();
 const customSelectById = new Map();
@@ -711,23 +718,83 @@ function renderStats() {
   railStats.innerHTML = `
     <div class="stat-card"><b>${DATA.stats.docCount}</b><span>源文档</span></div>
     <div class="stat-card"><b>${DATA.stats.itemCount}</b><span>标题知识点</span></div>
-    <div class="stat-card"><b>${DATA.stats.summaryItemCount || 0}</b><span>文档总结</span></div>
+    <div class="stat-card"><b>${LEARNING_PATH.sections?.length || 0}</b><span>上站分类</span></div>
     <div class="stat-card"><b>${DATA.stats.uniqueReferencedImages}</b><span>直接配图</span></div>`;
 }
+function renderModeSwitch() {
+  if (!docModeButton || !pathModeButton) return;
+  docModeButton.classList.toggle('active', state.view === 'docs');
+  pathModeButton.classList.toggle('active', state.view === 'path');
+  docModeButton.setAttribute('aria-pressed', String(state.view === 'docs'));
+  pathModeButton.setAttribute('aria-pressed', String(state.view === 'path'));
+}
 function renderDocs() {
+  renderModeSwitch();
+  if (state.view === 'path') {
+    renderPathNav();
+    return;
+  }
   docList.innerHTML = `<button class="doc-button${state.docId === 'all' ? ' active' : ''}" data-doc="all"><strong>全部文档</strong><span>${DATA.items.length} 个标题知识点</span></button>` +
     DATA.docs.map(doc => `<button class="doc-button${state.docId === doc.id ? ' active' : ''}" data-doc="${doc.id}"><strong>${escapeHtml(doc.title)}</strong><span>${doc.count} 个标题知识点</span></button>`).join('');
-  docList.querySelectorAll('button').forEach(button => {
+  docList.querySelectorAll('button[data-doc]').forEach(button => {
     button.addEventListener('click', () => {
       selectDoc(button.dataset.doc);
     });
   });
 }
+function renderPathNav() {
+  const stages = LEARNING_PATH.stages || [];
+  const sections = LEARNING_PATH.sections || [];
+  const parts = [
+    `<button class="doc-button path-button${state.pathId === 'all' ? ' active' : ''}" data-path="all">
+      <strong>完整上站路径</strong>
+      <span>按准备、建站、维护、数据、收益排列 · ${DATA.items.length} 个知识点</span>
+    </button>`
+  ];
+  stages.forEach(stage => {
+    const stageSections = sections.filter(section => section.stage === stage.id);
+    const stageCount = stageSections.reduce((total, section) => total + (section.itemIds || []).length, 0);
+    parts.push(`<div class="path-stage-label"><span>${escapeHtml(stage.title)}</span><em>${stageCount} 个</em></div>`);
+    stageSections.forEach(section => {
+      parts.push(`
+        <button class="doc-button path-button${state.pathId === section.id ? ' active' : ''}" data-path="${escapeHtml(section.id)}">
+          <strong>${escapeHtml(section.title)}</strong>
+          <span>${(section.itemIds || []).length} 个知识点 · ${escapeHtml(section.description || '')}</span>
+        </button>`);
+    });
+  });
+  docList.innerHTML = parts.join('');
+  docList.querySelectorAll('button[data-path]').forEach(button => {
+    button.addEventListener('click', () => {
+      selectPath(button.dataset.path);
+    });
+  });
+}
+function switchView(view) {
+  state.view = view === 'path' ? 'path' : 'docs';
+  state.activeId = null;
+  updateHash();
+  render();
+  scrollPaneToTop(docList);
+  scrollPaneToTop(resultList);
+  scrollPaneToTop(reader);
+}
 function renderMobileNav(items) {
   if (!mobileDocSelect || !mobileItemSelect) return;
-  mobileDocSelect.innerHTML = `<option value="all">全部文档 · ${DATA.items.length} 个知识点</option>` +
-    DATA.docs.map(doc => `<option value="${escapeHtml(doc.id)}">${escapeHtml(mobileOptionText(doc.title))} · ${doc.count} 个</option>`).join('');
-  mobileDocSelect.value = state.docId;
+  const docOptions = [
+    `<option value="docs:all">文档目录 · 全部文档 · ${DATA.items.length} 个</option>`,
+    ...DATA.docs.map(doc => `<option value="docs:${escapeHtml(doc.id)}">文档目录 · ${escapeHtml(mobileOptionText(doc.title))} · ${doc.count} 个</option>`)
+  ];
+  const pathOptions = [
+    `<option value="path:all">上站路径 · 完整路径 · ${DATA.items.length} 个</option>`,
+    ...(LEARNING_PATH.sections || []).map(section => {
+      const stage = pathStageById.get(section.stage);
+      const stageName = stage ? stage.title.replace(/^\d+\.\s*/, '') : '上站路径';
+      return `<option value="path:${escapeHtml(section.id)}">上站路径 · ${escapeHtml(stageName)} · ${escapeHtml(mobileOptionText(section.title, 24))} · ${(section.itemIds || []).length} 个</option>`;
+    })
+  ];
+  mobileDocSelect.innerHTML = [...docOptions, ...pathOptions].join('');
+  mobileDocSelect.value = state.view === 'path' ? `path:${state.pathId}` : `docs:${state.docId}`;
 
   if (!items.length) {
     mobileItemSelect.innerHTML = '<option value="">无匹配知识点</option>';
@@ -739,7 +806,8 @@ function renderMobileNav(items) {
 
   mobileItemSelect.disabled = false;
   mobileItemSelect.innerHTML = items.map(item => {
-    const prefix = item.type === 'summary' ? '总结' : `KP-${String(item.number).padStart(4, '0')}`;
+    const section = pathSectionById.get(LEARNING_PATH.itemSection?.[item.id]);
+    const prefix = state.view === 'path' && section ? section.title : (item.type === 'summary' ? '总结' : `KP-${String(item.number).padStart(4, '0')}`);
     return `<option value="${escapeHtml(item.id)}">${escapeHtml(prefix)} · ${escapeHtml(mobileOptionText(item.title, 42))}</option>`;
   }).join('');
   mobileItemSelect.value = state.activeId || items[0].id;
@@ -747,6 +815,7 @@ function renderMobileNav(items) {
   syncCustomSelect(mobileItemSelect);
 }
 function selectDoc(docId) {
+  state.view = 'docs';
   state.docId = docId || 'all';
   state.activeId = null;
   updateHash();
@@ -755,10 +824,34 @@ function selectDoc(docId) {
   scrollPaneToTop(reader);
   if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0);
 }
+function selectPath(pathId) {
+  state.view = 'path';
+  state.pathId = pathId || 'all';
+  state.sort = 'path';
+  if (sortSelect) {
+    sortSelect.value = 'path';
+    syncCustomSelect(sortSelect);
+  }
+  state.activeId = null;
+  updateHash();
+  render();
+  scrollPaneToTop(resultList);
+  scrollPaneToTop(reader);
+  if (window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0);
+}
+function compareByPath(a, b) {
+  return (pathOrderById.get(a.id) ?? a.number + 100000) - (pathOrderById.get(b.id) ?? b.number + 100000) || a.number - b.number;
+}
 function getFilteredItems() {
   searchMetaById.clear();
   let items = DATA.items;
-  if (state.docId !== 'all') items = items.filter(item => item.docId === state.docId);
+  if (state.view === 'path') {
+    const section = pathSectionById.get(state.pathId);
+    const allowedIds = section ? new Set(section.itemIds || []) : null;
+    if (allowedIds) items = items.filter(item => allowedIds.has(item.id));
+  } else if (state.docId !== 'all') {
+    items = items.filter(item => item.docId === state.docId);
+  }
   const q = state.query.trim();
   if (q) {
     items = items.map(item => {
@@ -766,16 +859,18 @@ function getFilteredItems() {
       const meta = matchItem(item, context, q);
       if (meta) searchMetaById.set(item.id, meta);
       return { item, score: meta?.score || 0 };
-    }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.item.number - b.item.number).map(row => row.item);
+    }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || (state.view === 'path' ? compareByPath(a.item, b.item) : a.item.number - b.item.number)).map(row => row.item);
   }
-  if (state.sort === 'long') items = [...items].sort((a, b) => b.charCount - a.charCount || a.number - b.number);
-  if (state.sort === 'images') items = [...items].sort((a, b) => b.imageCount - a.imageCount || a.number - b.number);
+  if (state.sort === 'path' || (state.view === 'path' && !q)) items = [...items].sort(compareByPath);
+  if (state.sort === 'long') items = [...items].sort((a, b) => b.charCount - a.charCount || (state.view === 'path' ? compareByPath(a, b) : a.number - b.number));
+  if (state.sort === 'images') items = [...items].sort((a, b) => b.imageCount - a.imageCount || (state.view === 'path' ? compareByPath(a, b) : a.number - b.number));
   return items;
 }
 function renderResults(items) {
   resultCount.textContent = `${items.length} 条`;
   if (state.activeId && !items.some(item => item.id === state.activeId)) state.activeId = items[0]?.id || null;
   if (!state.activeId && items[0]) state.activeId = items[0].id;
+  let lastSectionId = null;
   resultList.innerHTML = items.map(item => {
     const context = contextById.get(item.contextId);
     const searchMeta = searchMetaById.get(item.id);
@@ -783,10 +878,20 @@ function renderResults(items) {
     const thumb = image ? `<img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt || item.title)}" loading="lazy">` : `<span>无图</span>`;
     const snippet = searchMeta?.snippet || makeSnippet(item, context, state.query);
     const learned = isLearned(item.id);
+    const section = pathSectionById.get(LEARNING_PATH.itemSection?.[item.id]);
+    const stage = section ? pathStageById.get(section.stage) : null;
+    const groupHeader = state.view === 'path' && section && section.id !== lastSectionId
+      ? `<div class="path-result-group">
+          <div class="path-result-stage">${escapeHtml(stage?.title || '上站路径')}</div>
+          <strong>${escapeHtml(section.title)}</strong>
+          <p>${escapeHtml(section.description || '')}</p>
+        </div>`
+      : '';
+    if (state.view === 'path' && section) lastSectionId = section.id;
     const matchTags = state.query.trim() && searchMeta?.labels?.length
       ? `<div class="match-tags">${searchMeta.labels.slice(0, 3).map(label => `<span>${escapeHtml(label)}</span>`).join('')}</div>`
       : '';
-    return `
+    return `${groupHeader}
     <button class="result-card${item.id === state.activeId ? ' active' : ''}${learned ? ' learned' : ''}" data-id="${item.id}">
       <div class="result-thumb">${thumb}</div>
       <div class="result-copy">
@@ -796,6 +901,7 @@ function renderResults(items) {
         <div class="card-meta">
           <span class="pill">${escapeHtml(item.docTitle)}</span>
           ${item.type === 'summary' ? '<span class="pill">文档总结</span>' : ''}
+          ${state.view === 'path' && section ? `<span class="pill path-pill">${escapeHtml(section.title)}</span>` : ''}
           <span class="pill">第 ${item.sourceLine} 行</span>
           <span class="pill">正文 ${item.charCount} 字</span>
           <span class="pill">配图 ${(item.pairedImages || []).length}</span>
@@ -829,6 +935,9 @@ function renderReader(item) {
   const meta = context.meta.length ? `<div class="reader-source">${context.meta.map(x => `<span class="pill">${escapeHtml(x)}</span>`).join('')}</div>` : '';
   const summaryOverview = renderSummaryOverview(item);
   const learnedPill = isLearned(item.id) ? '<span class="pill learned-pill">已学</span>' : '';
+  const pathSection = pathSectionById.get(LEARNING_PATH.itemSection?.[item.id]);
+  const pathStage = pathSection ? pathStageById.get(pathSection.stage) : null;
+  const pathPill = pathSection ? `<span class="pill path-pill">上站路径：${escapeHtml(pathStage?.title || '')} / ${escapeHtml(pathSection.title)}</span>` : '';
   reader.innerHTML = `
     <div class="reader-inner">
       <header class="reader-header">
@@ -841,6 +950,7 @@ function renderReader(item) {
           <span class="pill">内容行号：${context.lineStart}-${context.lineEnd}</span>
           <span class="pill">正文：${context.charCount} 字</span>
           <span class="pill">配图：${context.imageCount} 张</span>
+          ${pathPill}
           ${learnedPill}
         </div>
         ${meta}
@@ -872,17 +982,27 @@ lightbox.addEventListener('click', event => { if (event.target === lightbox) clo
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeLightbox(); });
 function updateHash() {
   const params = new URLSearchParams();
-  if (state.docId !== 'all') params.set('doc', state.docId);
+  if (state.view === 'path') {
+    params.set('view', 'path');
+    if (state.pathId !== 'all') params.set('path', state.pathId);
+  } else if (state.docId !== 'all') {
+    params.set('doc', state.docId);
+  }
   if (state.query) params.set('q', state.query);
+  if (state.sort !== 'source') params.set('sort', state.sort);
   if (state.activeId) params.set('id', state.activeId);
   history.replaceState(null, '', `${location.pathname}#${params.toString()}`);
 }
 function readHash() {
   const params = new URLSearchParams(location.hash.replace(/^#/, ''));
+  state.view = params.get('view') === 'path' ? 'path' : 'docs';
   state.docId = params.get('doc') || 'all';
+  state.pathId = params.get('path') || 'all';
   state.query = params.get('q') || '';
+  state.sort = params.get('sort') || (state.view === 'path' ? 'path' : 'source');
   state.activeId = params.get('id');
   searchInput.value = state.query;
+  if (sortSelect) sortSelect.value = state.sort;
 }
 function render() {
   renderDocs();
@@ -893,7 +1013,8 @@ function render() {
 }
 searchInput.addEventListener('input', () => {
   state.query = searchInput.value;
-  state.docId = 'all';
+  if (state.view === 'path') state.pathId = 'all';
+  else state.docId = 'all';
   state.activeId = null;
   updateHash();
   render();
@@ -906,19 +1027,44 @@ sortSelect.addEventListener('change', () => {
   scrollPaneToTop(resultList);
   scrollPaneToTop(reader);
 });
+if (docModeButton) {
+  docModeButton.addEventListener('click', () => {
+    state.sort = 'source';
+    if (sortSelect) {
+      sortSelect.value = 'source';
+      syncCustomSelect(sortSelect);
+    }
+    switchView('docs');
+  });
+}
+if (pathModeButton) {
+  pathModeButton.addEventListener('click', () => {
+    state.sort = 'path';
+    if (sortSelect) {
+      sortSelect.value = 'path';
+      syncCustomSelect(sortSelect);
+    }
+    switchView('path');
+  });
+}
 mobileDocSelect.addEventListener('change', () => {
-  selectDoc(mobileDocSelect.value);
+  const [view, id = 'all'] = mobileDocSelect.value.split(':');
+  if (view === 'path') selectPath(id);
+  else selectDoc(id);
 });
 mobileItemSelect.addEventListener('change', () => {
   if (mobileItemSelect.value) selectItem(mobileItemSelect.value);
 });
 clearFilters.addEventListener('click', () => {
+  const currentView = state.view;
+  state.view = currentView;
   state.docId = 'all';
+  state.pathId = 'all';
   state.query = '';
-  state.sort = 'source';
+  state.sort = currentView === 'path' ? 'path' : 'source';
   state.activeId = null;
   searchInput.value = '';
-  sortSelect.value = 'source';
+  sortSelect.value = state.sort;
   updateHash();
   render();
   syncCustomSelect(sortSelect);

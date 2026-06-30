@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0f766e">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230f766e'/%3E%3Cpath d='M17 19h30v6H17zm0 10h30v6H17zm0 10h20v6H17z' fill='white'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=20260630-code-breaks">
+  <link rel="stylesheet" href="styles.css?v=20260630-learning-path">
 </head>
 <body>
   <div class="app-shell">
@@ -20,6 +20,10 @@
         <p>按标题拆分知识点，点开显示标题下的完整内容和图片。</p>
       </div>
       <div class="rail-stats" id="railStats"></div>
+      <div class="module-switch" aria-label="知识点查看方式">
+        <button type="button" id="docModeButton" class="module-button active">文档目录</button>
+        <button type="button" id="pathModeButton" class="module-button">上站路径</button>
+      </div>
       <nav class="doc-list" id="docList"></nav>
     </aside>
 
@@ -60,11 +64,12 @@
               <div class="eyebrow">标题知识点</div>
               <strong id="resultCount">0 条</strong>
             </div>
-            <select id="sortSelect" aria-label="排序方式">
-              <option value="source">按来源顺序</option>
-              <option value="long">正文最长优先</option>
-              <option value="images">图片最多优先</option>
-            </select>
+          <select id="sortSelect" aria-label="排序方式">
+            <option value="source">按来源顺序</option>
+            <option value="path">按上站路径</option>
+            <option value="long">正文最长优先</option>
+            <option value="images">图片最多优先</option>
+          </select>
           </div>
           <div class="result-list" id="resultList"></div>
         </aside>
@@ -123,6 +128,7 @@
   </div>
 
   <script src="kb-data.js"></script>
-  <script src="app.js?v=20260630-code-breaks"></script>
+  <script src="learning-path.js"></script>
+  <script src="app.js?v=20260630-learning-path"></script>
 </body>
 </html>
