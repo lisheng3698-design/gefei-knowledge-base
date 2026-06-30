@@ -13,6 +13,7 @@ const copyLink = document.getElementById('copyLink');
 const mobileDocSelect = document.getElementById('mobileDocSelect');
 const mobileItemSelect = document.getElementById('mobileItemSelect');
 const readerTopButton = document.getElementById('readerTopButton');
+const markLearnedButton = document.getElementById('markLearnedButton');
 const lightbox = document.getElementById('lightbox');
 const lightboxImage = document.getElementById('lightboxImage');
 const lightboxCaption = document.getElementById('lightboxCaption');
@@ -23,6 +24,9 @@ const contextById = new Map(DATA.contexts.map(context => [context.id, context]))
 const searchMetaById = new Map();
 const searchIndexById = new Map();
 const customSelectById = new Map();
+const LEARNED_STORAGE_KEY = 'gefeiLearnedItems';
+const LEARNED_COOKIE_KEY = 'gefei_learned_items';
+const learnedIds = readLearnedIds();
 const SEARCH_SYNONYM_GROUPS = [
   { keys: ['adsense', '广告联盟', '谷歌联盟', '广告审核', '过审'], terms: ['adsense', 'google adsense', '网站审核', '申请审核', 'ads.txt', '广告代码', 'pin码', 'ecpm', 'rpm'] },
   { keys: ['google ads', '谷歌广告', '投流', '投放', '买量'], terms: ['google ads', '广告投放', 'mcc', 'campaign', '关键词规划师', '广告账户', 'ads api'] },
@@ -49,6 +53,44 @@ const SEARCH_SYNONYM_GROUPS = [
 
 function scrollPaneToTop(element) {
   if (element) element.scrollTop = 0;
+}
+function parseLearnedValue(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  return value.split(',').map(id => id.trim()).filter(Boolean);
+}
+function readLearnedIds() {
+  const ids = new Set();
+  try {
+    parseLearnedValue(localStorage.getItem(LEARNED_STORAGE_KEY)).forEach(id => ids.add(id));
+  } catch {}
+  try {
+    const cookie = document.cookie.split('; ').find(row => row.startsWith(`${LEARNED_COOKIE_KEY}=`));
+    if (cookie) parseLearnedValue(decodeURIComponent(cookie.split('=').slice(1).join('='))).forEach(id => ids.add(id));
+  } catch {}
+  return new Set([...ids].filter(id => itemById.has(id)));
+}
+function saveLearnedIds() {
+  const ids = [...learnedIds].filter(id => itemById.has(id)).sort();
+  try { localStorage.setItem(LEARNED_STORAGE_KEY, JSON.stringify(ids)); } catch {}
+  try {
+    document.cookie = `${LEARNED_COOKIE_KEY}=${encodeURIComponent(ids.join(','))}; max-age=157680000; path=/; SameSite=Lax`;
+  } catch {}
+}
+function isLearned(id) {
+  return !!id && learnedIds.has(id);
+}
+function updateLearnedButton(id = state.activeId) {
+  if (!markLearnedButton) return;
+  const active = isLearned(id);
+  markLearnedButton.disabled = !id;
+  markLearnedButton.classList.toggle('active', active);
+  markLearnedButton.setAttribute('aria-pressed', String(active));
+  markLearnedButton.setAttribute('title', active ? '已标记为已学' : '标记为已学');
+  markLearnedButton.setAttribute('aria-label', active ? '当前知识点已学' : '标记当前知识点为已学');
 }
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -538,11 +580,12 @@ function renderResults(items) {
     const image = (item.pairedImages || [])[0] || (context?.images || [])[0];
     const thumb = image ? `<img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt || item.title)}" loading="lazy">` : `<span>无图</span>`;
     const snippet = searchMeta?.snippet || makeSnippet(item, context, state.query);
+    const learned = isLearned(item.id);
     const matchTags = state.query.trim() && searchMeta?.labels?.length
       ? `<div class="match-tags">${searchMeta.labels.slice(0, 3).map(label => `<span>${escapeHtml(label)}</span>`).join('')}</div>`
       : '';
     return `
-    <button class="result-card${item.id === state.activeId ? ' active' : ''}" data-id="${item.id}">
+    <button class="result-card${item.id === state.activeId ? ' active' : ''}${learned ? ' learned' : ''}" data-id="${item.id}">
       <div class="result-thumb">${thumb}</div>
       <div class="result-copy">
         <h3>${highlight(item.title, state.query)}</h3>
@@ -554,6 +597,7 @@ function renderResults(items) {
           <span class="pill">第 ${item.sourceLine} 行</span>
           <span class="pill">正文 ${item.charCount} 字</span>
           <span class="pill">配图 ${(item.pairedImages || []).length}</span>
+          ${learned ? '<span class="pill learned-pill">已学</span>' : ''}
         </div>
       </div>
     </button>`;
@@ -570,6 +614,7 @@ function selectItem(id) {
   scrollPaneToTop(reader);
 }
 function renderReader(item) {
+  updateLearnedButton(item?.id || null);
   if (!item) {
     reader.innerHTML = `<div class="empty-state"><h2>没有匹配的知识点</h2><p>换一个关键词，或者清除筛选后再看。</p></div>`;
     return;
@@ -581,6 +626,7 @@ function renderReader(item) {
   }
   const meta = context.meta.length ? `<div class="reader-source">${context.meta.map(x => `<span class="pill">${escapeHtml(x)}</span>`).join('')}</div>` : '';
   const summaryOverview = renderSummaryOverview(item);
+  const learnedPill = isLearned(item.id) ? '<span class="pill learned-pill">已学</span>' : '';
   reader.innerHTML = `
     <div class="reader-inner">
       <header class="reader-header">
@@ -593,6 +639,7 @@ function renderReader(item) {
           <span class="pill">内容行号：${context.lineStart}-${context.lineEnd}</span>
           <span class="pill">正文：${context.charCount} 字</span>
           <span class="pill">配图：${context.imageCount} 张</span>
+          ${learnedPill}
         </div>
         ${meta}
       </header>
@@ -677,12 +724,43 @@ clearFilters.addEventListener('click', () => {
 });
 copyLink.addEventListener('click', async () => {
   updateHash();
-  try { await navigator.clipboard.writeText(location.href); copyLink.textContent = '已复制'; setTimeout(() => copyLink.textContent = '复制当前链接', 1200); }
-  catch { copyLink.textContent = '复制失败'; setTimeout(() => copyLink.textContent = '复制当前链接', 1200); }
+  try {
+    await navigator.clipboard.writeText(location.href);
+    copyLink.classList.add('copied');
+    copyLink.setAttribute('aria-label', '已复制当前链接');
+    copyLink.setAttribute('title', '已复制');
+    setTimeout(() => {
+      copyLink.classList.remove('copied');
+      copyLink.setAttribute('aria-label', '复制当前链接');
+      copyLink.setAttribute('title', '复制当前链接');
+    }, 1200);
+  } catch {
+    copyLink.setAttribute('aria-label', '复制失败');
+    copyLink.setAttribute('title', '复制失败');
+    setTimeout(() => {
+      copyLink.setAttribute('aria-label', '复制当前链接');
+      copyLink.setAttribute('title', '复制当前链接');
+    }, 1200);
+  }
 });
-readerTopButton.addEventListener('click', () => {
-  scrollPaneToTop(reader);
-});
+if (readerTopButton) {
+  readerTopButton.addEventListener('click', () => {
+    scrollPaneToTop(reader);
+  });
+}
+if (markLearnedButton) {
+  markLearnedButton.addEventListener('click', () => {
+    if (!state.activeId) return;
+    learnedIds.add(state.activeId);
+    saveLearnedIds();
+    const scrollTop = reader.scrollTop;
+    const items = getFilteredItems();
+    renderResults(items);
+    renderMobileNav(items);
+    renderReader(itemById.get(state.activeId));
+    reader.scrollTop = scrollTop;
+  });
+}
 document.addEventListener('click', () => closeCustomSelects());
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeCustomSelects();
