@@ -10,6 +10,7 @@ const searchInput = document.getElementById('searchInput');
 const sortSelect = document.getElementById('sortSelect');
 const clearFilters = document.getElementById('clearFilters');
 const copyLink = document.getElementById('copyLink');
+const syncButton = document.getElementById('syncButton');
 const mobileDocSelect = document.getElementById('mobileDocSelect');
 const mobileItemSelect = document.getElementById('mobileItemSelect');
 const readerTopButton = document.getElementById('readerTopButton');
@@ -18,6 +19,15 @@ const lightbox = document.getElementById('lightbox');
 const lightboxImage = document.getElementById('lightboxImage');
 const lightboxCaption = document.getElementById('lightboxCaption');
 const lightboxClose = document.getElementById('lightboxClose');
+const syncModal = document.getElementById('syncModal');
+const syncClose = document.getElementById('syncClose');
+const syncForm = document.getElementById('syncForm');
+const syncGistId = document.getElementById('syncGistId');
+const syncToken = document.getElementById('syncToken');
+const syncFileName = document.getElementById('syncFileName');
+const syncNow = document.getElementById('syncNow');
+const syncForget = document.getElementById('syncForget');
+const syncStatus = document.getElementById('syncStatus');
 
 const itemById = new Map(DATA.items.map(item => [item.id, item]));
 const contextById = new Map(DATA.contexts.map(context => [context.id, context]));
@@ -26,6 +36,10 @@ const searchIndexById = new Map();
 const customSelectById = new Map();
 const LEARNED_STORAGE_KEY = 'gefeiLearnedItems';
 const LEARNED_COOKIE_KEY = 'gefei_learned_items';
+const LEARNED_SYNC_STORAGE_KEY = 'gefeiLearnedSyncConfig';
+const DEFAULT_SYNC_FILE = 'gefei-learned.json';
+const GIST_API_ROOT = 'https://api.github.com/gists';
+const syncState = { config: readSyncConfig(), syncing: false, pending: false };
 const learnedIds = readLearnedIds();
 const SEARCH_SYNONYM_GROUPS = [
   { keys: ['adsense', '广告联盟', '谷歌联盟', '广告审核', '过审'], terms: ['adsense', 'google adsense', '网站审核', '申请审核', 'ads.txt', '广告代码', 'pin码', 'ecpm', 'rpm'] },
@@ -80,6 +94,9 @@ function saveLearnedIds() {
     document.cookie = `${LEARNED_COOKIE_KEY}=${encodeURIComponent(ids.join(','))}; max-age=157680000; path=/; SameSite=Lax`;
   } catch {}
 }
+function learnedIdList() {
+  return [...learnedIds].filter(id => itemById.has(id)).sort();
+}
 function isLearned(id) {
   return !!id && learnedIds.has(id);
 }
@@ -91,6 +108,155 @@ function updateLearnedButton(id = state.activeId) {
   markLearnedButton.setAttribute('aria-pressed', String(active));
   markLearnedButton.setAttribute('title', active ? '已标记为已学' : '标记为已学');
   markLearnedButton.setAttribute('aria-label', active ? '当前知识点已学' : '标记当前知识点为已学');
+}
+function readSyncConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LEARNED_SYNC_STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return null;
+    const gistId = String(saved.gistId || '').trim();
+    const token = String(saved.token || '').trim();
+    const fileName = String(saved.fileName || DEFAULT_SYNC_FILE).trim() || DEFAULT_SYNC_FILE;
+    if (!gistId || !token) return null;
+    return { gistId, token, fileName };
+  } catch {
+    return null;
+  }
+}
+function saveSyncConfig(config) {
+  syncState.config = config;
+  try { localStorage.setItem(LEARNED_SYNC_STORAGE_KEY, JSON.stringify(config)); } catch {}
+  updateSyncState('ready');
+}
+function hasSyncConfig() {
+  return !!(syncState.config?.gistId && syncState.config?.token);
+}
+function setSyncStatus(message, mode = 'neutral') {
+  if (syncStatus) syncStatus.textContent = message;
+  if (!syncButton) return;
+  syncButton.classList.toggle('configured', hasSyncConfig());
+  syncButton.classList.toggle('syncing', mode === 'syncing');
+  syncButton.classList.toggle('error', mode === 'error');
+  syncButton.setAttribute('title', message || '已学云同步');
+}
+function updateSyncState(mode = 'neutral') {
+  if (!hasSyncConfig()) {
+    setSyncStatus('未配置云同步', 'neutral');
+    return;
+  }
+  if (mode === 'syncing') setSyncStatus('正在同步...', 'syncing');
+  else if (mode === 'error') setSyncStatus('同步失败，请检查配置', 'error');
+  else setSyncStatus(`云同步已配置：${syncState.config.fileName}`, 'ready');
+}
+function openSyncModal() {
+  if (!syncModal) return;
+  const config = syncState.config || {};
+  syncGistId.value = config.gistId || '';
+  syncToken.value = config.token || '';
+  syncFileName.value = config.fileName || DEFAULT_SYNC_FILE;
+  updateSyncState(hasSyncConfig() ? 'ready' : 'neutral');
+  syncModal.classList.add('open');
+  syncModal.setAttribute('aria-hidden', 'false');
+  syncGistId.focus();
+}
+function closeSyncModal() {
+  if (!syncModal) return;
+  syncModal.classList.remove('open');
+  syncModal.setAttribute('aria-hidden', 'true');
+}
+function normalizeSyncConfigFromForm() {
+  return {
+    gistId: String(syncGistId.value || '').trim(),
+    token: String(syncToken.value || '').trim(),
+    fileName: String(syncFileName.value || DEFAULT_SYNC_FILE).trim() || DEFAULT_SYNC_FILE
+  };
+}
+async function gistRequest(config, method = 'GET', body = null) {
+  const response = await fetch(`${GIST_API_ROOT}/${encodeURIComponent(config.gistId)}`, {
+    method,
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': `Bearer ${config.token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) throw new Error('Token 无法访问这个 Gist');
+    if (response.status === 404) throw new Error('Gist ID 不存在或无权限');
+    throw new Error(`GitHub 返回 ${response.status}`);
+  }
+  return response.json();
+}
+function parseRemoteLearnedIds(gist, fileName) {
+  const file = gist?.files?.[fileName];
+  if (!file?.content) return [];
+  try {
+    const parsed = JSON.parse(file.content);
+    const ids = Array.isArray(parsed) ? parsed : parsed.learnedIds;
+    return Array.isArray(ids) ? ids.filter(id => itemById.has(id)) : [];
+  } catch {
+    return [];
+  }
+}
+function mergeLearnedIds(ids) {
+  const before = learnedIdList().join(',');
+  ids.filter(id => itemById.has(id)).forEach(id => learnedIds.add(id));
+  const after = learnedIdList().join(',');
+  if (before !== after) saveLearnedIds();
+  return before !== after;
+}
+function refreshLearnedViews(scrollTop = reader.scrollTop) {
+  const items = getFilteredItems();
+  renderResults(items);
+  renderMobileNav(items);
+  renderReader(state.activeId ? itemById.get(state.activeId) : null);
+  reader.scrollTop = scrollTop;
+}
+async function syncLearned() {
+  if (!hasSyncConfig()) {
+    updateSyncState('neutral');
+    return false;
+  }
+  if (syncState.syncing) {
+    syncState.pending = true;
+    return false;
+  }
+  syncState.syncing = true;
+  updateSyncState('syncing');
+  try {
+    const config = syncState.config;
+    const gist = await gistRequest(config);
+    const remoteIds = parseRemoteLearnedIds(gist, config.fileName);
+    const changedLocal = mergeLearnedIds(remoteIds);
+    const ids = learnedIdList();
+    await gistRequest(config, 'PATCH', {
+      files: {
+        [config.fileName]: {
+          content: JSON.stringify({
+            version: 1,
+            updatedAt: new Date().toISOString(),
+            learnedIds: ids
+          }, null, 2)
+        }
+      }
+    });
+    if (changedLocal) refreshLearnedViews();
+    setSyncStatus(`已同步 ${ids.length} 条已学`, 'ready');
+    return true;
+  } catch (error) {
+    setSyncStatus(error.message || '同步失败', 'error');
+    return false;
+  } finally {
+    syncState.syncing = false;
+    if (syncState.pending) {
+      syncState.pending = false;
+      setTimeout(syncLearned, 300);
+    }
+  }
+}
+function queueLearnedSync() {
+  if (hasSyncConfig()) setTimeout(syncLearned, 0);
 }
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -743,6 +909,47 @@ copyLink.addEventListener('click', async () => {
     }, 1200);
   }
 });
+if (syncButton) {
+  syncButton.addEventListener('click', event => {
+    event.stopPropagation();
+    openSyncModal();
+  });
+}
+if (syncClose) syncClose.addEventListener('click', closeSyncModal);
+if (syncModal) {
+  syncModal.addEventListener('click', event => {
+    if (event.target === syncModal) closeSyncModal();
+  });
+}
+if (syncForm) {
+  syncForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const config = normalizeSyncConfigFromForm();
+    if (!config.gistId || !config.token) {
+      setSyncStatus('请填写 Gist ID 和 GitHub Token', 'error');
+      return;
+    }
+    saveSyncConfig(config);
+    await syncLearned();
+  });
+}
+if (syncNow) {
+  syncNow.addEventListener('click', () => {
+    const config = normalizeSyncConfigFromForm();
+    if (config.gistId && config.token) saveSyncConfig(config);
+    syncLearned();
+  });
+}
+if (syncForget) {
+  syncForget.addEventListener('click', () => {
+    syncState.config = null;
+    try { localStorage.removeItem(LEARNED_SYNC_STORAGE_KEY); } catch {}
+    syncGistId.value = '';
+    syncToken.value = '';
+    syncFileName.value = DEFAULT_SYNC_FILE;
+    updateSyncState('neutral');
+  });
+}
 if (readerTopButton) {
   readerTopButton.addEventListener('click', () => {
     scrollPaneToTop(reader);
@@ -759,13 +966,22 @@ if (markLearnedButton) {
     renderMobileNav(items);
     renderReader(itemById.get(state.activeId));
     reader.scrollTop = scrollTop;
+    queueLearnedSync();
   });
 }
 document.addEventListener('click', () => closeCustomSelects());
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeCustomSelects();
+  if (event.key === 'Escape') closeSyncModal();
 });
 readHash();
 setupCustomSelects();
 renderStats();
 render();
+updateSyncState();
+queueLearnedSync();
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(() => null);
+  });
+}

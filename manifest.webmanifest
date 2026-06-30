@@ -1,0 +1,19 @@
+{
+  "name": "哥飞知识点全文库",
+  "short_name": "哥飞知识库",
+  "description": "按标题拆分的哥飞知识点全文阅读库，可在 Android 上安装为应用。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f5f2",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
