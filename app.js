@@ -980,6 +980,9 @@ renderStats();
 render();
 updateSyncState();
 queueLearnedSync();
+setInterval(() => {
+  if (hasSyncConfig()) syncLearned();
+}, 60000);
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js').catch(() => null);

@@ -1,9 +1,9 @@
-const CACHE_NAME = 'gefei-kb-app-v20260630-sync-pwa';
+const CACHE_NAME = 'gefei-kb-app-v20260630-sync-pwa2';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css?v=20260630-sync-pwa',
-  './app.js?v=20260630-sync-pwa',
+  './styles.css?v=20260630-sync-pwa2',
+  './app.js?v=20260630-sync-pwa2',
   './kb-data.js',
   './manifest.webmanifest',
   './app-icon.svg'
