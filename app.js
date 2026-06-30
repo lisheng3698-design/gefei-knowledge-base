@@ -68,6 +68,11 @@ const SEARCH_SYNONYM_GROUPS = [
 function scrollPaneToTop(element) {
   if (element) element.scrollTop = 0;
 }
+function lockHorizontalScroll() {
+  document.documentElement.scrollLeft = 0;
+  document.body.scrollLeft = 0;
+  if (reader) reader.scrollLeft = 0;
+}
 function parseLearnedValue(value) {
   if (!value) return [];
   try {
@@ -988,3 +993,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./service-worker.js').catch(() => null);
   });
 }
+window.addEventListener('scroll', lockHorizontalScroll, { passive: true });
+if (reader) reader.addEventListener('scroll', lockHorizontalScroll, { passive: true });
+window.addEventListener('resize', lockHorizontalScroll);
+lockHorizontalScroll();
