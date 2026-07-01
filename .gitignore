@@ -1,0 +1,4 @@
+audio/voicebox-wav-cache/
+*.log
+.DS_Store
+audio-deploy-watch-status.json

@@ -1,5 +1,6 @@
 const DATA = window.KB_DATA;
 const LEARNING_PATH = window.KB_LEARNING_PATH || { stages: [], sections: [], itemSection: {} };
+const AUDIO_MANIFEST = window.KB_AUDIO_MANIFEST || { items: {} };
 const state = { view: 'docs', docId: 'all', pathId: 'all', query: '', sort: 'source', activeId: null };
 
 const docList = document.getElementById('docList');
@@ -18,6 +19,7 @@ const mobileDocSelect = document.getElementById('mobileDocSelect');
 const mobileItemSelect = document.getElementById('mobileItemSelect');
 const readerTopButton = document.getElementById('readerTopButton');
 const markLearnedButton = document.getElementById('markLearnedButton');
+const readerSpeechButton = document.getElementById('readerSpeechButton');
 const lightbox = document.getElementById('lightbox');
 const lightboxImage = document.getElementById('lightboxImage');
 const lightboxCaption = document.getElementById('lightboxCaption');
@@ -47,6 +49,19 @@ const LEARNED_SYNC_STORAGE_KEY = 'gefeiLearnedSyncConfig';
 const DEFAULT_SYNC_FILE = 'gefei-learned.json';
 const GIST_API_ROOT = 'https://api.github.com/gists';
 const syncState = { config: readSyncConfig(), syncing: false, pending: false };
+const speechState = {
+  mode: null,
+  itemId: null,
+  chunks: [],
+  index: 0,
+  playing: false,
+  paused: false,
+  utterance: null,
+  audio: null,
+  session: 0
+};
+const preGeneratedAudio = new Audio();
+preGeneratedAudio.preload = 'metadata';
 const learnedIds = readLearnedIds();
 const SEARCH_SYNONYM_GROUPS = [
   { keys: ['adsense', '广告联盟', '谷歌联盟', '广告审核', '过审'], terms: ['adsense', 'google adsense', '网站审核', '申请审核', 'ads.txt', '广告代码', 'pin码', 'ecpm', 'rpm'] },
@@ -143,6 +158,41 @@ function learnedIdList() {
 function isLearned(id) {
   return !!id && learnedIds.has(id);
 }
+function audioEntryForItem(id = state.activeId) {
+  const entry = id ? AUDIO_MANIFEST.items?.[id] : null;
+  if (!entry || !entry.src) return null;
+  return entry;
+}
+function hasPreGeneratedAudio(id = state.activeId) {
+  return !!audioEntryForItem(id);
+}
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const minutes = Math.floor(value / 60);
+  const rest = Math.round(value % 60);
+  return `${minutes}:${String(rest).padStart(2, '0')}`;
+}
+function isReaderAudioElement(audio) {
+  return !!audio?.classList?.contains('reader-audio-player');
+}
+function currentReaderAudioPlayer(id = state.activeId) {
+  const entry = audioEntryForItem(id);
+  if (!entry || !reader) return null;
+  const player = reader.querySelector('.reader-audio-player');
+  if (!player) return null;
+  const src = player.getAttribute('src') || '';
+  return src === entry.src || player.currentSrc.endsWith(entry.src) ? player : null;
+}
+function focusReaderAudioPlayer(id = state.activeId) {
+  const player = currentReaderAudioPlayer(id);
+  const panel = player?.closest('.reader-audio-panel');
+  if (!player || !panel) return;
+  panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  panel.classList.add('audio-panel-focus');
+  player.focus({ preventScroll: true });
+  window.setTimeout(() => panel.classList.remove('audio-panel-focus'), 1800);
+}
 function updateLearnedButton(id = state.activeId) {
   if (!markLearnedButton) return;
   const active = isLearned(id);
@@ -151,6 +201,36 @@ function updateLearnedButton(id = state.activeId) {
   markLearnedButton.setAttribute('aria-pressed', String(active));
   markLearnedButton.setAttribute('title', active ? '已标记为已学' : '标记为已学');
   markLearnedButton.setAttribute('aria-label', active ? '当前知识点已学' : '标记当前知识点为已学');
+}
+function updateSpeechButton(id = state.activeId) {
+  if (!readerSpeechButton) return;
+  readerSpeechButton.classList.remove('playing', 'paused', 'unsupported');
+  const hasAudio = hasPreGeneratedAudio(id);
+  if (!id || !hasAudio) {
+    readerSpeechButton.textContent = id ? '生成中' : '播放';
+    readerSpeechButton.disabled = true;
+    readerSpeechButton.classList.add('unsupported');
+    readerSpeechButton.setAttribute('aria-label', id ? '当前知识点音频正在生成中' : '请选择知识点后播放音频');
+    readerSpeechButton.setAttribute('title', id ? '音频正在生成中，稍后刷新后可播放' : '请选择知识点后播放音频');
+    return;
+  }
+  readerSpeechButton.disabled = false;
+  const current = id && speechState.itemId === id && (speechState.playing || speechState.paused);
+  if (!current) {
+    readerSpeechButton.textContent = '播放';
+    readerSpeechButton.setAttribute('aria-label', '播放当前知识点音频');
+    readerSpeechButton.setAttribute('title', '播放预生成音频');
+  } else if (speechState.paused) {
+    readerSpeechButton.textContent = '继续';
+    readerSpeechButton.classList.add('paused');
+    readerSpeechButton.setAttribute('aria-label', '继续播放当前知识点音频');
+    readerSpeechButton.setAttribute('title', '继续播放，长按停止');
+  } else {
+    readerSpeechButton.textContent = '暂停';
+    readerSpeechButton.classList.add('playing');
+    readerSpeechButton.setAttribute('aria-label', '暂停当前知识点音频');
+    readerSpeechButton.setAttribute('title', '暂停播放，长按停止');
+  }
 }
 function readSyncConfig() {
   try {
@@ -164,6 +244,9 @@ function readSyncConfig() {
   } catch {
     return null;
   }
+}
+function isLikelyAutoplayBlock(error) {
+  return ['NotAllowedError', 'AbortError'].includes(error?.name);
 }
 function saveSyncConfig(config) {
   syncState.config = config;
@@ -205,6 +288,97 @@ function closeSyncModal() {
   if (!syncModal) return;
   syncModal.classList.remove('open');
   syncModal.setAttribute('aria-hidden', 'true');
+}
+function stopSpeech() {
+  speechState.session += 1;
+  if (speechState.audio) {
+    speechState.audio.pause();
+    if (speechState.audio === preGeneratedAudio) {
+      speechState.audio.removeAttribute('src');
+      speechState.audio.load();
+    }
+  }
+  speechState.mode = null;
+  speechState.itemId = null;
+  speechState.chunks = [];
+  speechState.index = 0;
+  speechState.playing = false;
+  speechState.paused = false;
+  speechState.utterance = null;
+  speechState.audio = null;
+  updateSpeechButton();
+}
+function pauseSpeech() {
+  if (!speechState.playing) return;
+  if (speechState.mode === 'audio' && speechState.audio) {
+    speechState.audio.pause();
+  }
+  speechState.playing = false;
+  speechState.paused = true;
+  updateSpeechButton();
+}
+function resumeSpeech() {
+  if (!speechState.paused) return;
+  if (speechState.mode === 'audio' && speechState.audio) {
+    speechState.audio.play().catch(() => {
+      stopSpeech();
+      window.alert('音频播放失败，请稍后再试。');
+    });
+  }
+  speechState.playing = true;
+  speechState.paused = false;
+  updateSpeechButton();
+}
+function startPreGeneratedAudio(item, entry) {
+  const readerAudio = currentReaderAudioPlayer(item.id);
+  stopSpeech();
+  speechState.session += 1;
+  speechState.mode = 'audio';
+  speechState.itemId = item.id;
+  speechState.audio = readerAudio || preGeneratedAudio;
+  speechState.playing = true;
+  speechState.paused = false;
+  if (speechState.audio === preGeneratedAudio) {
+    preGeneratedAudio.src = entry.src;
+  }
+  if (speechState.audio.ended || speechState.audio.currentTime > 0.2) {
+    speechState.audio.currentTime = 0;
+  }
+  const playAttempt = speechState.audio.play();
+  if (!playAttempt || typeof playAttempt.catch !== 'function') {
+    updateSpeechButton(item.id);
+    return;
+  }
+  playAttempt.catch(error => {
+    stopSpeech();
+    focusReaderAudioPlayer(item.id);
+    const detail = isLikelyAutoplayBlock(error) ? '浏览器阻止了这次播放，请直接点击文章音频播放器。' : '请检查音频文件是否已生成，或直接点击文章音频播放器。';
+    window.alert(`音频播放失败，${detail}`);
+  });
+  updateSpeechButton(item.id);
+}
+function startSpeech(item) {
+  const entry = audioEntryForItem(item?.id);
+  if (item && entry) {
+    startPreGeneratedAudio(item, entry);
+    return;
+  }
+  if (item) {
+    focusReaderAudioPlayer(item.id);
+    window.alert('当前知识点音频正在生成中，生成完成并更新后即可播放。');
+  }
+  updateSpeechButton(item?.id || null);
+}
+function toggleSpeech() {
+  const item = state.activeId ? itemById.get(state.activeId) : null;
+  if (!item) return;
+  if (speechState.itemId !== item.id || (!speechState.playing && !speechState.paused)) {
+    startSpeech(item);
+  } else if (speechState.paused) {
+    resumeSpeech();
+  } else {
+    pauseSpeech();
+  }
 }
 function normalizeSyncConfigFromForm() {
   return {
@@ -878,6 +1052,7 @@ function renderResults(items) {
     const thumb = image ? `<img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt || item.title)}" loading="lazy">` : `<span>无图</span>`;
     const snippet = searchMeta?.snippet || makeSnippet(item, context, state.query);
     const learned = isLearned(item.id);
+    const hasAudio = hasPreGeneratedAudio(item.id);
     const section = pathSectionById.get(LEARNING_PATH.itemSection?.[item.id]);
     const stage = section ? pathStageById.get(section.stage) : null;
     const groupHeader = state.view === 'path' && section && section.id !== lastSectionId
@@ -905,6 +1080,7 @@ function renderResults(items) {
           <span class="pill">第 ${item.sourceLine} 行</span>
           <span class="pill">正文 ${item.charCount} 字</span>
           <span class="pill">配图 ${(item.pairedImages || []).length}</span>
+          ${hasAudio ? '<span class="pill audio-pill">有音频</span>' : ''}
           ${learned ? '<span class="pill learned-pill">已学</span>' : ''}
         </div>
       </div>
@@ -913,6 +1089,7 @@ function renderResults(items) {
   resultList.querySelectorAll('.result-card').forEach(card => card.addEventListener('click', () => selectItem(card.dataset.id)));
 }
 function selectItem(id) {
+  if (speechState.itemId && speechState.itemId !== id) stopSpeech();
   state.activeId = id;
   updateHash();
   const items = getFilteredItems();
@@ -923,6 +1100,7 @@ function selectItem(id) {
 }
 function renderReader(item) {
   updateLearnedButton(item?.id || null);
+  updateSpeechButton(item?.id || null);
   if (!item) {
     reader.innerHTML = `<div class="empty-state"><h2>没有匹配的知识点</h2><p>换一个关键词，或者清除筛选后再看。</p></div>`;
     return;
@@ -935,6 +1113,16 @@ function renderReader(item) {
   const meta = context.meta.length ? `<div class="reader-source">${context.meta.map(x => `<span class="pill">${escapeHtml(x)}</span>`).join('')}</div>` : '';
   const summaryOverview = renderSummaryOverview(item);
   const learnedPill = isLearned(item.id) ? '<span class="pill learned-pill">已学</span>' : '';
+  const audioEntry = audioEntryForItem(item.id);
+  const audioPanel = audioEntry
+    ? `<section class="reader-audio-panel">
+        <div>
+          <strong>文章音频</strong>
+          <span>${escapeHtml(audioEntry.voice || AUDIO_MANIFEST.voice || '普通话男声')}${audioEntry.duration ? ` · ${escapeHtml(formatDuration(audioEntry.duration))}` : ''}</span>
+        </div>
+        <audio class="reader-audio-player" controls preload="metadata" src="${escapeHtml(audioEntry.src)}"></audio>
+      </section>`
+    : '';
   const pathSection = pathSectionById.get(LEARNING_PATH.itemSection?.[item.id]);
   const pathStage = pathSection ? pathStageById.get(pathSection.stage) : null;
   const pathPill = pathSection ? `<span class="pill path-pill">上站路径：${escapeHtml(pathStage?.title || '')} / ${escapeHtml(pathSection.title)}</span>` : '';
@@ -955,11 +1143,38 @@ function renderReader(item) {
         </div>
         ${meta}
       </header>
+      ${audioPanel}
       <section class="article-content">${context.html || '<p>该标题下没有正文内容。</p>'}</section>
       ${summaryOverview}
     </div>`;
   reader.querySelectorAll('.article-content img').forEach(img => {
     img.addEventListener('click', () => openLightbox(img.currentSrc || img.src, img.alt || item.title));
+  });
+  reader.querySelectorAll('.reader-audio-player').forEach(audio => {
+    audio.addEventListener('play', () => {
+      if (speechState.audio !== audio) stopSpeech();
+      speechState.session += 1;
+      speechState.mode = 'audio';
+      speechState.itemId = item.id;
+      speechState.audio = audio;
+      speechState.playing = true;
+      speechState.paused = false;
+      updateSpeechButton(item.id);
+    });
+    audio.addEventListener('pause', () => {
+      if (speechState.mode !== 'audio' || speechState.audio !== audio || audio.ended) return;
+      speechState.playing = false;
+      speechState.paused = true;
+      updateSpeechButton(item.id);
+    });
+    audio.addEventListener('ended', () => {
+      if (speechState.mode === 'audio' && speechState.audio === audio) stopSpeech();
+    });
+    audio.addEventListener('error', () => {
+      if (speechState.mode !== 'audio' || speechState.audio !== audio) return;
+      stopSpeech();
+      window.alert('音频播放失败，请检查文件是否已生成，或刷新页面后再试。');
+    });
   });
   applyReadableBreaks(reader.querySelector('.article-content'));
   reader.querySelectorAll('.summary-open').forEach(button => {
@@ -1012,6 +1227,7 @@ function render() {
   renderReader(state.activeId ? itemById.get(state.activeId) : null);
 }
 searchInput.addEventListener('input', () => {
+  stopSpeech();
   state.query = searchInput.value;
   if (state.view === 'path') state.pathId = 'all';
   else state.docId = 'all';
@@ -1138,6 +1354,45 @@ if (readerTopButton) {
     scrollPaneToTop(reader);
   });
 }
+if (readerSpeechButton) {
+  let speechLongPressStopped = false;
+  let speechPointerHandled = false;
+  readerSpeechButton.addEventListener('click', () => {
+    if (speechLongPressStopped) {
+      speechLongPressStopped = false;
+      return;
+    }
+    if (speechPointerHandled) {
+      speechPointerHandled = false;
+      return;
+    }
+    toggleSpeech();
+  });
+  readerSpeechButton.addEventListener('contextmenu', event => {
+    event.preventDefault();
+    stopSpeech();
+  });
+  let speechHoldTimer = null;
+  readerSpeechButton.addEventListener('pointerdown', event => {
+    if (event.button != null && event.button !== 0) return;
+    speechLongPressStopped = false;
+    speechPointerHandled = true;
+    toggleSpeech();
+    speechHoldTimer = window.setTimeout(() => {
+      stopSpeech();
+      speechLongPressStopped = true;
+      speechHoldTimer = null;
+    }, 650);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(type => {
+    readerSpeechButton.addEventListener(type, () => {
+      if (speechHoldTimer) {
+        window.clearTimeout(speechHoldTimer);
+        speechHoldTimer = null;
+      }
+    });
+  });
+}
 if (markLearnedButton) {
   markLearnedButton.addEventListener('click', () => {
     if (!state.activeId) return;
@@ -1156,6 +1411,14 @@ document.addEventListener('click', () => closeCustomSelects());
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeCustomSelects();
   if (event.key === 'Escape') closeSyncModal();
+});
+preGeneratedAudio.addEventListener('ended', () => {
+  if (speechState.mode === 'audio') stopSpeech();
+});
+preGeneratedAudio.addEventListener('error', () => {
+  if (speechState.mode !== 'audio') return;
+  stopSpeech();
+  window.alert('音频播放失败，请检查文件是否已生成。');
 });
 readHash();
 setupCustomSelects();
